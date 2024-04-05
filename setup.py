@@ -10,7 +10,7 @@ setup(
     long_description=readme,
     long_description_content_type="text/markdown",
     author_email='2906698981@qq.com',
-    url='https://github.com/FlagOpen/FlagEmbedding',
+    url='https://github.com/ShokSmile/FlagEmbedding.git',
     packages=find_packages(),
     install_requires=[
         'torch>=1.6.0',

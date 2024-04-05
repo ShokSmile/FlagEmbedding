@@ -87,11 +87,11 @@ class BGEM3FlagModel:
                 scores += weight * lexical_weights_2[token]
         return scores
 
-    def colbert_score(self, q_reps, p_reps):
-        q_reps, p_reps = torch.from_numpy(q_reps), torch.from_numpy(p_reps)
-        token_scores = torch.einsum('in,jn->ij', q_reps, p_reps)
+    def colbert_score(self, reps, p_reps):
+        reps, p_reps = torch.from_numpy(reps), torch.from_numpy(p_reps)
+        token_scores = torch.einsum('in,jn->ij', reps, p_reps)
         scores, _ = token_scores.max(-1)
-        scores = torch.sum(scores) / q_reps.size(0)
+        scores = torch.sum(scores) / reps.size(0)
         return scores
 
 
@@ -186,11 +186,29 @@ class BGEM3FlagModel:
 
     @torch.no_grad()
     def compute_score(self,
-                      sentence_pairs: Union[List[Tuple[str, str]], Tuple[str, str]],
-                      batch_size: int = 256,
-                      max_query_length: int = 512,
-                      max_passage_length: int = 8192,
+                      sentences: List[str],
+                      batch_size: int = 16,
+                      model_max_length: int = 300,
+                      save_tensor: bool = False, 
+                      path_to_save: str = "",
                       weights_for_different_modes: List[float] = None) -> Dict[str, List[float]]:
+        
+        """
+    This function encodes input and calculate score for each representation 
+
+    Args:
+        sentences (List[str]): That's a list of strings. You have to preprocess your input before calling this function. It means choose format of input (title, description, title+description or another)
+        save_tensor (bool): Should we save torch.Tensor with embeddings or not.
+        path_to_save (str): path where it's necessary to save model
+        model_max_length (int): max input length if it's bigger -> truncation
+        weights_for_different_modes (List[float]): weights of sum of all representations
+        batch_size (int): batch size
+    Returns:
+        torch.Tensor: tensor with whole representations depending on return_dense, return_sparse, return_colbert_vecs.
+        
+    TODO:
+    1. Add weighted sum for different modes
+    """
 
         def _tokenize(texts: list, max_length: int):
             return self.tokenizer(
@@ -205,45 +223,61 @@ class BGEM3FlagModel:
         if self.num_gpus > 0:
             batch_size *= self.num_gpus
         self.model.eval()
-        if isinstance(sentence_pairs, list) and len(sentence_pairs) == 0:
+        if isinstance(sentences, list) and len(sentences) == 0:
             return []
-        if isinstance(sentence_pairs[0], str):
-            one_input_pair = True
-            sentence_pairs = [sentence_pairs]
-        else:
-            one_input_pair = False
 
-        all_scores = {
-            'colbert': [],
-            'sparse': [],
-            'dense': [],
-            'sparse+dense': [],
-            'colbert+sparse+dense': []
-        }
-        for start_index in tqdm(range(0, len(sentence_pairs), batch_size), desc="Compute Scores",
-                                disable=len(sentence_pairs) < 128):
-            sentences_batch = sentence_pairs[start_index:start_index + batch_size]
+        # all_scores = {
+        #     'colbert': [],
+        #     'sparse': [],
+        #     'dense': [],
+        #     # 'sparse+dense': [],
+        #     # 'colbert+sparse+dense': []
+        # }
+        for start_index in tqdm(range(0, len(sentences), batch_size), desc="Compute scores and encode sentences..."):
+            queries_batch = sentences[start_index:start_index + batch_size]
 
-            queries_batch = [pair[0] for pair in sentences_batch]
-            corpus_batch = [pair[1] for pair in sentences_batch]
-
-            queries_inputs = _tokenize(queries_batch, max_length=max_query_length).to(self.device)
-            corpus_inputs = _tokenize(corpus_batch, max_length=max_passage_length).to(self.device)
+            queries_inputs = _tokenize(queries_batch, max_length=model_max_length).to(self.device)
+            
 
             queries_output = self.model(queries_inputs, return_dense=True, return_sparse=True, return_colbert=True,
                                         return_sparse_embedding=True)
-            corpus_output = self.model(corpus_inputs, return_dense=True, return_sparse=True, return_colbert=True,
-                                       return_sparse_embedding=True)
-
-            q_dense_vecs, q_sparse_vecs, q_colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
+            
+            dense_vecs, sparse_vecs, colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
             queries_output['colbert_vecs']
-            p_dense_vecs, p_sparse_vecs, p_colbert_vecs = corpus_output['dense_vecs'], corpus_output['sparse_vecs'], \
-            corpus_output['colbert_vecs']
+            
+            
+            print(f"""
+                  ------------------------
+                  Dense representation
+                  type: {type(dense_vecs)}
+                  type_1: {type(dense_vecs[0])}
+                  shape: {dense_vecs[0].shape}
+                  ------------------------
+                  
+                  
+                  ------------------------
+                  Sparse representation
+                  type: {type(sparse_vecs)}
+                  type_1: {type(sparse_vecs)}
+                  shape: {sparse_vecs}
+                  ------------------------
+                  
+                   ------------------------
+                  Colbert representation
+                  type: {type(colbert_vecs)}
+                  type_1: {type(colbert_vecs)}
+                  shape: {colbert_vecs.shape}
+                  ------------------------
+                  """)
 
-            dense_scores = self.model.dense_score(q_dense_vecs, p_dense_vecs)
-            sparse_scores = self.model.sparse_score(q_sparse_vecs, p_sparse_vecs)
-            colbert_scores = self.model.colbert_score(q_colbert_vecs, p_colbert_vecs,
-                                                      q_mask=queries_inputs['attention_mask'])
+            #TODO: add tensors where we'll save our representations
+
+            dense_scores = self.model.dense_score(dense_vecs, dense_vecs)
+            sparse_scores = self.model.sparse_score(sparse_vecs, dense_vecs)
+            colbert_scores = self.model.colbert_score(colbert_vecs, dense_vecs,
+                                                      mask=queries_inputs['attention_mask'])
+            
+            # TODO: add sim matrix
 
             if weights_for_different_modes is None:
                 weights_for_different_modes = [1, 1., 1.]
@@ -253,25 +287,25 @@ class BGEM3FlagModel:
                 assert len(weights_for_different_modes) == 3
                 weight_sum = sum(weights_for_different_modes)
 
-            inx = torch.arange(0, len(sentences_batch))
-            dense_scores, sparse_scores, colbert_scores = dense_scores[inx, inx].float(), sparse_scores[
-                inx, inx].float(), colbert_scores[inx, inx].float()
+            # inx = torch.arange(0, len(queries_inputs))
+            # dense_scores, sparse_scores, colbert_scores = dense_scores[inx, inx].float(), sparse_scores[
+            #     inx, inx].float(), colbert_scores[inx, inx].float()
 
-            all_scores['colbert'].extend(
-                colbert_scores.cpu().numpy().tolist()
-            )
-            all_scores['sparse'].extend(
-                sparse_scores.cpu().numpy().tolist()
-            )
-            all_scores['dense'].extend(
-                dense_scores.cpu().numpy().tolist()
-            )
-            all_scores['sparse+dense'].extend(
-                ((sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/(weights_for_different_modes[1]+weights_for_different_modes[0])).cpu().numpy().tolist()
-            )
-            all_scores['colbert+sparse+dense'].extend(
-                ((colbert_scores * weights_for_different_modes[2] + sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/weight_sum).cpu().numpy().tolist()
-            )
+            # all_scores['colbert'].extend(
+            #     colbert_scores.cpu().numpy().tolist()
+            # )
+            # all_scores['sparse'].extend(
+            #     sparse_scores.cpu().numpy().tolist()
+            # )
+            # all_scores['dense'].extend(
+            #     dense_scores.cpu().numpy().tolist()
+            # )
+            # all_scores['sparse+dense'].extend(
+            #     ((sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/(weights_for_different_modes[1]+weights_for_different_modes[0])).cpu().numpy().tolist()
+            # )
+            # all_scores['colbert+sparse+dense'].extend(
+            #     ((colbert_scores * weights_for_different_modes[2] + sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/weight_sum).cpu().numpy().tolist()
+            # )
 
         if one_input_pair:
             return {k: v[0] for k, v in all_scores.items()}

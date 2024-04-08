@@ -189,6 +189,7 @@ class BGEM3FlagModel:
     @torch.no_grad()
     def compute_score_matrix(self,
                       sentences: List[str],
+                      return_embeddings: bool = True,
                       batch_size: int = 16,
                       model_max_length: int = 300,
                       save_tensor: bool = False, 
@@ -239,10 +240,10 @@ class BGEM3FlagModel:
                 queries_batch = sentences[start_index:start_index + batch_size]
 
             queries_inputs = _tokenize(queries_batch, max_length=model_max_length).to(self.device)
-            print(queries_inputs)
             queries_output = self.model(queries_inputs, return_dense=True, return_sparse=False, return_colbert=False,
                                         return_sparse_embedding=False)
             
+            # for the moment becaus eof the sizes of emb matrices -> we hate make it only for dense representations
             # dense_vecs, sparse_vecs, colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
             # queries_output['colbert_vecs']
             
@@ -291,8 +292,10 @@ class BGEM3FlagModel:
             # # TODO: add sim matrix
         dense_emb.cpu()
         sim_matrix = self.model.compute_similarity(dense_emb, dense_emb).half()
-        return sim_matrix
-    
+        if return_embeddings:
+            return dense_emb, sim_matrix
+        else:
+            return sim_matrix
     
 if __name__ == "__main__":
     import pandas as pd

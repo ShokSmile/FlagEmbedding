@@ -228,7 +228,8 @@ class BGEM3FlagModel:
         if isinstance(sentences, list) and len(sentences) == 0:
             return []
 
-        sim_matrix = torch.zeros(3, len(sentences), len(sentences), dtype=torch.float)
+        # sim_matrix = torch.zeros(3, len(sentences), len(sentences), dtype=torch.float)
+        dense_emb = torch.zeros(len(sentences), 1024)
         
         
         for start_index in tqdm(range(0, len(sentences), batch_size), desc="Compute scores and encode sentences..."):
@@ -239,83 +240,58 @@ class BGEM3FlagModel:
 
             queries_inputs = _tokenize(queries_batch, max_length=model_max_length).to(self.device)
             print(queries_inputs)
-            queries_output = self.model(queries_inputs, return_dense=True, return_sparse=True, return_colbert=True,
-                                        return_sparse_embedding=True)
+            queries_output = self.model(queries_inputs, return_dense=True, return_sparse=False, return_colbert=False,
+                                        return_sparse_embedding=False)
             
-            dense_vecs, sparse_vecs, colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
-            queries_output['colbert_vecs']
+            # dense_vecs, sparse_vecs, colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
+            # queries_output['colbert_vecs']
             
+            dense_vecs = queries_output['dense_vecs']
             
-            print(f"""
-                  ------------------------
-                  Dense representation
-                  type: {type(dense_vecs)}
-                  dense vec : {dense_vecs[0]}
-                  shape: {dense_vecs.shape}
-                  ------------------------
+            if start_index + batch_size >= len(sentences):
+                dense_emb[start_index:, :] = dense_vecs
+            else:
+                dense_emb[start_index: start_index + batch_size, :] = dense_vecs
+            
+            # print(f"""
+            #       ------------------------
+            #       Dense representation
+            #       type: {type(dense_vecs)}
+            #       dense vec : {dense_vecs[0]}
+            #       shape: {dense_vecs.shape}
+            #       ------------------------
                   
                   
-                  ------------------------
-                  Sparse representation
-                  type: {type(sparse_vecs)}
-                  type_1: {sparse_vecs[0]}
-                  shape: {sparse_vecs.shape}
-                  ------------------------
+            #       ------------------------
+            #       Sparse representation
+            #       type: {type(sparse_vecs)}
+            #       type_1: {sparse_vecs[0]}
+            #       shape: {sparse_vecs.shape}
+            #       ------------------------
                   
-                   ------------------------
-                  Colbert representation
-                  type: {type(colbert_vecs)}
-                  type_1: {colbert_vecs[0]}
-                  shape: {colbert_vecs.shape}
-                  ------------------------
-                  """)
+            #        ------------------------
+            #       Colbert representation
+            #       type: {type(colbert_vecs)}
+            #       type_1: {colbert_vecs[0]}
+            #       shape: {colbert_vecs.shape}
+            #       ------------------------
+            #       """)
 
             #TODO: add tensors where we'll save our representations
 
-            dense_scores = self.model.dense_score(dense_vecs, dense_vecs)
-            sparse_scores = self.model.sparse_score(sparse_vecs, sparse_vecs)
-            colbert_scores = self.model.colbert_score(colbert_vecs, colbert_vecs,
-                                                      q_mask=queries_inputs['attention_mask'])
+            # dense_scores = self.model.dense_score(dense_vecs, dense_vecs)
+            # sparse_scores = self.model.sparse_score(sparse_vecs, sparse_vecs)
+            # colbert_scores = self.model.colbert_score(colbert_vecs, colbert_vecs,
+            #                                           q_mask=queries_inputs['attention_mask'])
             
-            print(dense_scores)
-            print(sparse_scores)
-            print(colbert_scores)
+            # print(dense_scores)
+            # print(sparse_scores)
+            # print(colbert_scores)
             
             # # TODO: add sim matrix
-            
-            if start_index + batch_size >= len(sentences):
-                
-                sim_matrix[0, start_index]
-
-            # if weights_for_different_modes is None:
-            #     weights_for_different_modes = [1, 1., 1.]
-            #     weight_sum = 3
-            #     print("default weights for dense, sparse, colbert are [1.0, 1.0, 1.0] ")
-            # else:
-            #     assert len(weights_for_different_modes) == 3
-            #     weight_sum = sum(weights_for_different_modes)
-
-            # inx = torch.arange(0, len(queries_inputs))
-            # dense_scores, sparse_scores, colbert_scores = dense_scores[inx, inx].float(), sparse_scores[
-            #     inx, inx].float(), colbert_scores[inx, inx].float()
-
-            # all_scores['colbert'].extend(
-            #     colbert_scores.cpu().numpy().tolist()
-            # )
-            # all_scores['sparse'].extend(
-            #     sparse_scores.cpu().numpy().tolist()
-            # )
-            # all_scores['dense'].extend(
-            #     dense_scores.cpu().numpy().tolist()
-            # )
-            # all_scores['sparse+dense'].extend(
-            #     ((sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/(weights_for_different_modes[1]+weights_for_different_modes[0])).cpu().numpy().tolist()
-            # )
-            # all_scores['colbert+sparse+dense'].extend(
-            #     ((colbert_scores * weights_for_different_modes[2] + sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/weight_sum).cpu().numpy().tolist()
-            # )
-
-        return None
+        dense_emb.cpu()
+        sim_matrix = self.model.compute_similarity(dense_emb, dense_emb).half()
+        return sim_matrix
     
     
 if __name__ == "__main__":

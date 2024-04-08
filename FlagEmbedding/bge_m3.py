@@ -103,6 +103,8 @@ class BGEM3FlagModel:
                return_dense: bool = True,
                return_sparse: bool = False,
                return_colbert_vecs: bool = False) -> Dict:
+        
+        # print(self.num_gpus)
 
         if self.num_gpus > 1:
             batch_size *= self.num_gpus
@@ -185,7 +187,7 @@ class BGEM3FlagModel:
                 "colbert_vecs": all_colbert_vec}
 
     @torch.no_grad()
-    def compute_score(self,
+    def compute_score_matrix(self,
                       sentences: List[str],
                       batch_size: int = 16,
                       model_max_length: int = 300,
@@ -222,23 +224,21 @@ class BGEM3FlagModel:
 
         if self.num_gpus > 0:
             batch_size *= self.num_gpus
-        self.model.eval()
+        
         if isinstance(sentences, list) and len(sentences) == 0:
             return []
 
-        # all_scores = {
-        #     'colbert': [],
-        #     'sparse': [],
-        #     'dense': [],
-        #     # 'sparse+dense': [],
-        #     # 'colbert+sparse+dense': []
-        # }
+        sim_matrix = torch.zeros(3, len(sentences), len(sentences), dtype=torch.float)
+        
+        
         for start_index in tqdm(range(0, len(sentences), batch_size), desc="Compute scores and encode sentences..."):
-            queries_batch = sentences[start_index:start_index + batch_size]
+            if start_index + batch_size >= len(sentences):
+                queries_batch = sentences[start_index:]
+            else:
+                queries_batch = sentences[start_index:start_index + batch_size]
 
             queries_inputs = _tokenize(queries_batch, max_length=model_max_length).to(self.device)
-            
-
+            print(queries_inputs)
             queries_output = self.model(queries_inputs, return_dense=True, return_sparse=True, return_colbert=True,
                                         return_sparse_embedding=True)
             
@@ -250,22 +250,22 @@ class BGEM3FlagModel:
                   ------------------------
                   Dense representation
                   type: {type(dense_vecs)}
-                  type_1: {type(dense_vecs[0])}
-                  shape: {dense_vecs[0].shape}
+                  dense vec : {dense_vecs[0]}
+                  shape: {dense_vecs.shape}
                   ------------------------
                   
                   
                   ------------------------
                   Sparse representation
                   type: {type(sparse_vecs)}
-                  type_1: {type(sparse_vecs)}
-                  shape: {sparse_vecs}
+                  type_1: {sparse_vecs[0]}
+                  shape: {sparse_vecs.shape}
                   ------------------------
                   
                    ------------------------
                   Colbert representation
                   type: {type(colbert_vecs)}
-                  type_1: {type(colbert_vecs)}
+                  type_1: {colbert_vecs[0]}
                   shape: {colbert_vecs.shape}
                   ------------------------
                   """)
@@ -273,19 +273,27 @@ class BGEM3FlagModel:
             #TODO: add tensors where we'll save our representations
 
             dense_scores = self.model.dense_score(dense_vecs, dense_vecs)
-            sparse_scores = self.model.sparse_score(sparse_vecs, dense_vecs)
-            colbert_scores = self.model.colbert_score(colbert_vecs, dense_vecs,
-                                                      mask=queries_inputs['attention_mask'])
+            sparse_scores = self.model.sparse_score(sparse_vecs, sparse_vecs)
+            colbert_scores = self.model.colbert_score(colbert_vecs, colbert_vecs,
+                                                      q_mask=queries_inputs['attention_mask'])
             
-            # TODO: add sim matrix
+            print(dense_scores)
+            print(sparse_scores)
+            print(colbert_scores)
+            
+            # # TODO: add sim matrix
+            
+            if start_index + batch_size >= len(sentences):
+                
+                sim_matrix[0, start_index]
 
-            if weights_for_different_modes is None:
-                weights_for_different_modes = [1, 1., 1.]
-                weight_sum = 3
-                print("default weights for dense, sparse, colbert are [1.0, 1.0, 1.0] ")
-            else:
-                assert len(weights_for_different_modes) == 3
-                weight_sum = sum(weights_for_different_modes)
+            # if weights_for_different_modes is None:
+            #     weights_for_different_modes = [1, 1., 1.]
+            #     weight_sum = 3
+            #     print("default weights for dense, sparse, colbert are [1.0, 1.0, 1.0] ")
+            # else:
+            #     assert len(weights_for_different_modes) == 3
+            #     weight_sum = sum(weights_for_different_modes)
 
             # inx = torch.arange(0, len(queries_inputs))
             # dense_scores, sparse_scores, colbert_scores = dense_scores[inx, inx].float(), sparse_scores[
@@ -307,9 +315,45 @@ class BGEM3FlagModel:
             #     ((colbert_scores * weights_for_different_modes[2] + sparse_scores * weights_for_different_modes[1] + dense_scores * weights_for_different_modes[0])/weight_sum).cpu().numpy().tolist()
             # )
 
-        if one_input_pair:
-            return {k: v[0] for k, v in all_scores.items()}
-        return all_scores
+        return None
+    
+    
+if __name__ == "__main__":
+    import pandas as pd
+    import json
+    
+    
+    # # read initial csv
+    # data = pd.read_csv("/Users/sanek_tarasov/Nukema/data/contrat_attribue.csv")
 
+    # # target == nb offre recu
+    # target = data['nb_offre_recu']
+
+    # # indexes of initial data (not NaN)
+    # indexes = data[(data['source_contrat'] == 'BOAMP') & (~pd.isna(data['nb_offre_recu']))]['nb_offre_recu'].index
+
+    # # read json file with pretokenized data: title, description, title+description
+    # with open("/Users/sanek_tarasov/Nukema/data/tokenized_data_with_mix.json") as f:
+    #     data_dict = json.load(f)
+
+    # # Choosing samples from pre-tokenized data dict which are not NaN (using indexes)
+    # data_dict = [data_dict[i] for i in tqdm(indexes, desc="Choosing samples from pre-tokenized data dict")]
+    # # sometimes we have empty descriptions (NaN) -> change it to empty str
+    # for i in range(len(data_dict)):
+    #     if pd.isna(data_dict[i]['description']):
+    #         data_dict[i]['description'] = ""
+    #     if pd.isna(data_dict[i]['title']):
+    #         data_dict[i]['title'] = "" 
+    
+    
+    test = ["Hello world",
+            "Bye World", 
+            "How are you going",
+            "ha ah dkkm dksmdks dkdne"]
+    
+    
+    model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=False, device="cpu")
+    model.compute_score_matrix(test)
+    
 
 

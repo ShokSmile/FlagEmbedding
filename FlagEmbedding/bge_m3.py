@@ -240,10 +240,13 @@ class BGEM3FlagModel:
                 queries_batch = sentences[start_index:start_index + batch_size]
 
             queries_inputs = _tokenize(queries_batch, max_length=model_max_length).to(self.device)
-            queries_output = self.model(queries_inputs, return_dense=True, return_sparse=False, return_colbert=False,
+            
+            queries_output = self.model(queries_inputs, return_dense=True,
+                                        return_sparse=False,
+                                        return_colbert=False,
                                         return_sparse_embedding=False)
             
-            # for the moment becaus eof the sizes of emb matrices -> we hate make it only for dense representations
+            # for the moment because of the sizes of emb matrices -> we hate make it only for dense representations
             # dense_vecs, sparse_vecs, colbert_vecs = queries_output['dense_vecs'], queries_output['sparse_vecs'], \
             # queries_output['colbert_vecs']
             

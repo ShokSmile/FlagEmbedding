@@ -294,11 +294,12 @@ class BGEM3FlagModel:
             
             # # TODO: add sim matrix
         dense_emb.cpu()
-        sim_matrix = self.model.compute_similarity(dense_emb, dense_emb).half()
-        if return_embeddings:
-            return dense_emb, sim_matrix
-        else:
-            return sim_matrix
+        # sim_matrix = self.model.compute_similarity(dense_emb, dense_emb).half()
+        # if return_embeddings:
+        #     return dense_emb, sim_matrix
+        # else:
+        #     return sim_matrix
+        return dense_emb.half()
     
 if __name__ == "__main__":
     import pandas as pd
@@ -335,7 +336,8 @@ if __name__ == "__main__":
     
     
     model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=False, device="cpu")
-    model.compute_score_matrix(test)
+    emd, matrix = model.compute_score_matrix(test)
     
+    print()
 
 
